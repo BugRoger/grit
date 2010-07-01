@@ -93,9 +93,9 @@ module Grit
 
     attr_accessor :git_dir, :bytes_read, :work_tree
 
-    def initialize(git_dir)
+    def initialize(git_dir, work_tree = nil)
       self.git_dir    = git_dir
-      self.work_tree  = git_dir.gsub(/\/\.git$/,'')
+      self.work_tree  = work_tree
       self.bytes_read = 0
     end
 
@@ -103,6 +103,15 @@ module Grit
       str.to_s.gsub("'", "\\\\'").gsub(";", '\\;')
     end
     alias_method :e, :shell_escape
+
+    def shell_quote(str)
+      if RUBY_PLATFORM.downcase =~ /mswin(?!ce)|mingw|bccwin/ 
+        "\"#{str}\""
+      else 
+        "'#{str}'"
+      end
+    end
+    alias_method :q, :shell_quote
 
     # Check if a normal file exists on the filesystem
     #   +file+ is the relative path from the Git dir
@@ -432,15 +441,10 @@ module Grit
 
       opt_args = transform_options(options)
 
-      if RUBY_PLATFORM.downcase =~ /mswin(?!ce)|mingw|bccwin/
-        ext_args = args.reject { |a| a.empty? }.map { |a| (a == '--' || a[0].chr == '|' || Grit.no_quote) ? a : "\"#{e(a)}\"" }
-        gitdir = base ? "--git-dir=\"#{self.git_dir}\"" : ""
-        call = "#{prefix}#{Git.git_binary} #{gitdir} #{cmd.to_s.gsub(/_/, '-')} #{(opt_args + ext_args).join(' ')}#{e(postfix)}"
-      else
-        ext_args = args.reject { |a| a.empty? }.map { |a| (a == '--' || a[0].chr == '|' || Grit.no_quote) ? a : "'#{e(a)}'" }
-        gitdir = base ? "--git-dir='#{self.git_dir}'" : ""
-        call = "#{prefix}#{Git.git_binary} #{gitdir} #{cmd.to_s.gsub(/_/, '-')} #{(opt_args + ext_args).join(' ')}#{e(postfix)}"
-      end
+      ext_args = args.reject { |a| a.empty? }.map { |a| (a == '--' || a[0].chr == '|'  || Grit.no_quote) ? a : q(e(a)) }
+      call = "#{prefix}#{Git.git_binary}"
+      call += " --work-tree=#{q(self.work_tree)}" if self.work_tree
+      call += " --git-dir=#{q(self.git_dir)} #{cmd.to_s.gsub(/_/, '-')} #{(opt_args + ext_args).join(' ')}#{e(postfix)}"
 
       Grit.log(call) if Grit.debug
       response, err = timeout ? sh(call, &block) : wild_sh(call, &block)
